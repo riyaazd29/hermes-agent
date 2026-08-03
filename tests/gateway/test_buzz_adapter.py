@@ -252,10 +252,69 @@ class TestMentionGating:
         assert adapter._dispatched == []
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", ["ask @Chipotle about it", "chip@example.com replied"])
+    async def test_display_name_lookalikes_do_not_dispatch(self, adapter, content):
+        await self._poll_with(adapter, _event("e1", content=content, created_at=10))
+        assert adapter._dispatched == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("identity", [SELF_NPUB, SELF_PUBKEY])
+    async def test_npub_and_hex_addressing_still_dispatch(self, adapter, identity):
+        await self._poll_with(adapter, _event("e1", content=f"ask {identity} for help", created_at=10))
+        assert len(adapter._dispatched) == 1
+
+    @pytest.mark.asyncio
+    async def test_dm_bare_display_name_dispatches_with_text_unchanged(self, adapter):
+        adapter._channel_state[CHANNEL]["chat_type"] = "dm"
+        content = "Chip is handling this"
+        await self._poll_with(adapter, _event("e1", content=content, created_at=10))
+        assert adapter._dispatched[0]["text"] == content
+
+    @pytest.mark.asyncio
+    async def test_dm_display_name_lookalike_dispatches_with_text_unchanged(self, adapter):
+        adapter._channel_state[CHANNEL]["chat_type"] = "dm"
+        content = "@Chipotle says hi"
+        await self._poll_with(adapter, _event("e1", content=content, created_at=10))
+        assert adapter._dispatched[0]["text"] == content
+
+    @pytest.mark.asyncio
+    async def test_require_mention_false_display_name_lookalike_preserves_text(self, adapter):
+        adapter.require_mention = False
+        content = "@Chipotle says hi"
+        await self._poll_with(adapter, _event("e1", content=content, created_at=10))
+        assert adapter._dispatched[0]["text"] == content
+
+    @pytest.mark.asyncio
     async def test_allowlist_blocks_unauthorized(self, adapter):
         adapter._allowed_pubkeys = {"b" * 64}
         await self._poll_with(adapter, _event("e1", content="@Chip hello", created_at=10))
         assert adapter._dispatched == []
+
+
+class TestMentionStripping:
+
+    def test_bare_leading_display_name_is_preserved(self):
+        adapter = _make_adapter()
+        assert adapter._strip_mention("Chip is handling this") == "Chip is handling this"
+
+    def test_display_name_does_not_strip_word_prefix(self):
+        adapter = _make_adapter()
+        content = "@Chipotle says hi"
+        assert adapter._strip_mention(content) == content
+
+    def test_display_name_with_regex_characters_does_not_strip_word_prefix(self):
+        adapter = _make_adapter()
+        adapter._display_name = "C++ Bot (QA)"
+        content = "@C++ Bot (QA)Extra"
+        assert adapter._strip_mention(content) == content
+
+    @pytest.mark.parametrize(
+        "identity",
+        ["@Chip", SELF_NPUB, f"@{SELF_NPUB}", SELF_PUBKEY, f"@{SELF_PUBKEY}"],
+    )
+    def test_leading_explicit_identity_is_stripped(self, identity):
+        adapter = _make_adapter()
+        assert adapter._strip_mention(f"{identity}: handle this") == "handle this"
 
 
 # ── DM classification via p-tags (issue #68871) ──────────────────────────
