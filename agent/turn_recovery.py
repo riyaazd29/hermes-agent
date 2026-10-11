@@ -1592,7 +1592,9 @@ def describe_invalid_response(agent: Any, response: Any, api_duration: float) ->
     if provider_name == "Unknown" and response and hasattr(response, 'model') and response.model:
         provider_name = f"model={response.model}"
 
-    if provider_name == "Unknown" and response:
+    # ``vars()`` raises ``TypeError`` on objects without ``__dict__`` (e.g. an un-awaited coroutine
+    # where a response belongs), and this diagnostic must never crash on the thing it is diagnosing.
+    if provider_name == "Unknown" and response and hasattr(response, '__dict__'):
         resp_attrs = {k: str(v)[:100] for k, v in vars(response).items() if not k.startswith('_')}
         if agent.verbose_logging:
             logging.debug(f"Response attributes for invalid response: {resp_attrs}")
