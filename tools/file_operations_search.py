@@ -355,6 +355,15 @@ class SearchMixin:
         except OSError as exc:
             return ExecuteResult(stdout=f"rg: {exc}", exit_code=2)
 
+        # Record the process group at spawn (the shape LocalEnvironment._run_bash sets) so
+        # teardown can still sweep reparented grandchildren when the child dies first.
+        try:
+            proc._hermes_pgid = os.getpgid(proc.pid)
+            from gateway.status import get_process_start_time
+            proc._hermes_pgid_start = get_process_start_time(proc.pid)
+        except OSError:
+            pass
+
         # Drain on a thread so a silent rg (huge tree, no hits yet) cannot pin the
         # caller past the deadline or past a /stop; the waiter below owns both.
         lines: list[bytes] = []
@@ -382,7 +391,10 @@ class SearchMixin:
                 exit_code = 124
                 break
         if proc.poll() is None:
-            _kill_process_group_posix(proc)  # native lane is POSIX-only (gate above)
+            try:
+                _kill_process_group_posix(proc)  # native lane is POSIX-only (gate above)
+            except OSError:
+                pass  # teardown must never replace the matches already drained
         proc.wait()
         drainer.join()
         proc.stdout.close()

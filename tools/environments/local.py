@@ -893,13 +893,17 @@ def _kill_process_group_posix(proc) -> None:
     init — and we wait on the group, not the wrapper, which can exit before
     grandchildren under load. POSIX-only (_IS_WINDOWS handled by the caller).
     PID-reuse guard (#43044): the group is only signalled while its leader's start
-    time still matches the spawn-time baseline — a recycled PGID is never killed."""
+    time still matches the spawn-time baseline — a recycled PGID is never killed.
+    Teardown never raises on a dead or recycled group: the caller keeps whatever it
+    already collected."""
     expected_start = getattr(proc, "_hermes_pgid_start", None)
     try:
         pgid = os.getpgid(proc.pid)
     except ProcessLookupError:
         if (pgid := getattr(proc, "_hermes_pgid", None)) is None:
-            raise
+            return  # child already reaped: nothing of ours left to signal
+    except PermissionError:
+        return  # PID recycled to a foreign process: signal nothing
     if not _leader_is_ours(pgid, expected_start):
         # Leader exited and its PID/PGID may have been recycled onto an unrelated
         # process group; signalling the stale number is unsafe. Bail out — a rare
